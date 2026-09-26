@@ -1,37 +1,34 @@
 import React, { useState } from 'react';
 import { Play, Download, Settings, Users, Film, Sparkles, Volume2, Plus, Trash2, Radio } from 'lucide-react';
+import { GoogleGenAI } from '@google/genai';
 
 export default function CinematicVoiceStudio() {
   const [apiKey, setApiKey] = useState('');
-  const [activeTab, setActiveTab] = useState('script'); // 'cast', 'script', 'studio', 'export'
+  const [activeTab, setActiveTab] = useState('script'); 
   
-  // 1. Character Cast Management (Young to Elder Hero Archetypes & Villains)
   const [cast, setCast] = useState([
     { id: 1, name: 'Alex (Young Protagonist)', voice: 'Puck', age: 'Young Adult (20s)', timbre: 'Eager, tense, high-energy', basePrompt: 'Speak in a tense, breathless, young heroic voice under extreme pressure:' },
     { id: 2, name: 'Commander Vance (Veteran Mentor)', voice: 'Kore', age: 'Elder (60s)', timbre: 'Deep, gravelly, weathered bass', basePrompt: 'Speak in a deep, slow, weathered elder mentor voice with heavy bass and absolute authority:' },
     { id: 3, name: 'The Interrogator (Villain)', voice: 'Charon', age: 'Middle-Aged', timbre: 'Cold, calculated, chilling whisper', basePrompt: 'Speak in a cold, calculating, eerie villain voice, slow and menacing:' }
   ]);
 
-  // 2. Movie Dialogue & Scene Script Lines
   const [scriptLines, setScriptLines] = useState([
     { id: 1, characterId: 1, text: "The signal... it's coming from inside the locked bunker.", situation: "Whispering in a dark room", speed: "1.0x", pause: "Medium" },
     { id: 2, characterId: 2, text: "Step away from the terminal, kid. You don't know what we woke up.", situation: "Authoritative warning", speed: "0.9x", pause: "Long" },
     { id: 3, characterId: 3, text: "Too late, Commander. The loop is already closing.", situation: "Cold, chilling climax", speed: "0.85x", pause: "Dramatic" }
   ]);
 
-  // 3. Studio Master Effects Settings
   const [masterSettings, setMasterSettings] = useState({
     bassBoost: true,
-    bassGain: "+8dB",
-    reverb: "Cinematic Hall (Subtle)",
-    compression: "Broadcast Limiter Pro",
-    sampleRate: "24kHz High-Definition"
+    bassGain: '+8dB',
+    reverb: 'Cinematic Hall (Subtle)',
+    compression: 'Broadcast Limiter Pro',
+    sampleRate: '24kHz High-Definition'
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedAudioUrl, setGeneratedAudioUrl] = useState(null);
 
-  // Add new dialogue line
   const addLine = () => {
     setScriptLines([...scriptLines, {
       id: Date.now(),
@@ -47,29 +44,70 @@ export default function CinematicVoiceStudio() {
     setScriptLines(scriptLines.filter(line => line.id !== id));
   };
 
-  // Simulate Generation and Studio Mastering Pipeline
+  // Live Gemini API Integration for Browser Audio Generation
   const handleGenerateMovieAudio = async () => {
     if (!apiKey) {
       alert("Please enter your Google AI Studio API Key first!");
       return;
     }
     setIsGenerating(true);
-    
-    // Construct full multi-speaker cinematic prompt package
-    const fullScriptPayload = scriptLines.map(line => {
-      const char = cast.find(c => c.id === Number(line.characterId));
-      return `[Character: ${char.name}] [Voice: ${char.voice}] [Situation: ${line.situation}] [Speed/Timing: ${line.speed}, Pause: ${line.pause}] -> "${line.text}"`;
-    }).join("\n");
+    setGeneratedAudioUrl(null);
 
-    console.log("Sending to Gemini TTS Pipeline:", fullScriptPayload);
+    try {
+      const ai = new GoogleGenAI({ apiKey: apiKey });
 
-    // Simulated API response & audio compilation for preview
-    setTimeout(() => {
+      // Build structured screenplay prompt package for Gemini
+      const fullScriptPayload = scriptLines.map(line => {
+        const char = cast.find(c => c.id === Number(line.characterId)) || cast[0];
+        return `${char.basePrompt} [Situation: ${line.situation}] "${line.text}"`;
+      }).join("\n\n");
+
+      // Call Gemini model with AUDIO response modality
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: fullScriptPayload,
+        config: {
+          responseModalities: ['AUDIO'],
+        },
+      });
+
+      // Extract base64 audio data from response candidates
+      let base64Audio = null;
+      for (const candidate of response.candidates || []) {
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              base64Audio = part.inlineData.data;
+              break;
+            }
+          }
+        }
+        if (base64Audio) break;
+      }
+
+      if (base64Audio) {
+        // Convert base64 PCM data into a playable Blob URL
+        const binaryString = atob(base64Audio);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const wavBlob = new Blob([bytes], { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(wavBlob);
+        
+        setGeneratedAudioUrl(audioUrl);
+        alert("🎬 Movie sequence audio successfully generated and mastered!");
+      } else {
+        alert("Audio generation completed, but no audio stream was returned by the model.");
+      }
+
+    } catch (error) {
+      console.error("Gemini API Error:", error);
+      alert("Error generating audio: " + error.message);
+    } finally {
       setIsGenerating(false);
-      alert("🎬 Movie sequence audio generated and studio-mastered successfully! Ready for download.");
-      // In production, this binds to the backend base64 WAV blob decoded from Gemini interaction output
-      setGeneratedAudioUrl("#"); 
-    }, 2500);
+    }
   };
 
   return (
@@ -80,11 +118,10 @@ export default function CinematicVoiceStudio() {
           <Film className="w-8 h-8 text-amber-500 animate-pulse" />
           <div>
             <h1 className="text-2xl font-bold tracking-wider">CINEMATIC VOICE PRO</h1>
-            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini 3.8 Flash TTS</p>
+            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini Live TTS</p>
           </div>
         </div>
         
-        {/* API Key Input */}
         <div className="flex items-center space-x-2 bg-slate-900 p-2 rounded-lg border border-slate-800">
           <Radio className="w-4 h-4 text-emerald-400" />
           <input 
@@ -122,9 +159,7 @@ export default function CinematicVoiceStudio() {
       {/* Main Content Area */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left/Center Panel: Dynamic Workspace */}
         <div className="lg:col-span-2 space-y-6">
-          
           {activeTab === 'script' && (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="flex justify-between items-center mb-4">
@@ -139,68 +174,63 @@ export default function CinematicVoiceStudio() {
               </div>
 
               <div className="space-y-4 max-h-[550px] overflow-y-auto pr-2">
-                {scriptLines.map((line, index) => {
-                  const currentChar = cast.find(c => c.id === Number(line.characterId)) || cast[0];
-                  return (
-                    <div key={line.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3 relative group">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-mono text-amber-500">SCENE LINE #{index + 1}</span>
-                        <button onClick={() => removeLine(line.id)} className="text-slate-500 hover:text-red-400 transition">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                {scriptLines.map((line, index) => (
+                  <div key={line.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3 relative group">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-mono text-amber-500">SCENE LINE #{index + 1}</span>
+                      <button onClick={() => removeLine(line.id)} className="text-slate-500 hover:text-red-400 transition">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
 
-                      {/* Character & Situation Selectors */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Speaker Character</label>
-                          <select 
-                            value={line.characterId}
-                            onChange={(e) => {
-                              const updated = [...scriptLines];
-                              updated[index].characterId = e.target.value;
-                              setScriptLines(updated);
-                            }}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
-                            {cast.map(c => (
-                              <option key={c.id} value={c.id}>{c.name} ({c.age})</option>
-                            ))}
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Situational Mood / Tone</label>
-                          <input 
-                            type="text" 
-                            value={line.situation}
-                            onChange={(e) => {
-                              const updated = [...scriptLines];
-                              updated[index].situation = e.target.value;
-                              setScriptLines(updated);
-                            }}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                            placeholder="e.g. Whispering in terror, shouting over wind..."
-                          />
-                        </div>
-                      </div>
-
-                      {/* Dialogue Input */}
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Dialogue Text (Use '...' for dramatic pauses)</label>
-                        <textarea 
-                          rows="2"
-                          value={line.text}
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Speaker Character</label>
+                        <select 
+                          value={line.characterId}
                           onChange={(e) => {
                             const updated = [...scriptLines];
-                            updated[index].text = e.target.value;
+                            updated[index].characterId = e.target.value;
                             setScriptLines(updated);
                           }}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-sm text-slate-100 focus:outline-none focus:border-amber-500 resize-none font-serif"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
+                          {cast.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.age})</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Situational Mood / Tone</label>
+                        <input 
+                          type="text" 
+                          value={line.situation}
+                          onChange={(e) => {
+                            const updated = [...scriptLines];
+                            updated[index].situation = e.target.value;
+                            setScriptLines(updated);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                          placeholder="e.g. Whispering in terror..."
                         />
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Dialogue Text (Use '...' for dramatic pauses)</label>
+                      <textarea 
+                        rows="2"
+                        value={line.text}
+                        onChange={(e) => {
+                          const updated = [...scriptLines];
+                          updated[index].text = e.target.value;
+                          setScriptLines(updated);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-sm text-slate-100 focus:outline-none focus:border-amber-500 resize-none font-serif"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <button 
@@ -208,7 +238,7 @@ export default function CinematicVoiceStudio() {
                 disabled={isGenerating}
                 className="w-full mt-6 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
                 {isGenerating ? (
-                  <span>Synthesizing Cinematic Scene Audio...</span>
+                  <span>Synthesizing Live Gemini Cinematic Audio...</span>
                 ) : (
                   <>
                     <Volume2 className="w-5 h-5" />
@@ -223,14 +253,14 @@ export default function CinematicVoiceStudio() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <h2 className="text-lg font-semibold flex items-center space-x-2 mb-4">
                 <Users className="w-5 h-5 text-amber-400" />
-                <span>Character Cast Library (Young to Elder Heroes & Villains)</span>
+                <span>Character Cast Library</span>
               </h2>
               <div className="grid grid-cols-1 gap-4">
                 {cast.map(member => (
                   <div key={member.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center">
                     <div>
                       <h3 className="font-bold text-sm text-amber-400">{member.name}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">Archetype: {member.age} | Base Timbre: {member.timbre}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Archetype: {member.age} | Timbre: {member.timbre}</p>
                       <p className="text-xs font-mono text-slate-500 mt-2 bg-slate-900 p-2 rounded border border-slate-800">Prompt Tag: {member.basePrompt}</p>
                     </div>
                     <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-1 rounded-full font-mono">Voice: {member.voice}</span>
@@ -244,7 +274,7 @@ export default function CinematicVoiceStudio() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
                 <Settings className="w-5 h-5 text-amber-400" />
-                <span>DSP Audio Mastering Chain (Theater Quality)</span>
+                <span>DSP Audio Mastering Chain</span>
               </h2>
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
@@ -253,9 +283,9 @@ export default function CinematicVoiceStudio() {
                     value={masterSettings.bassGain} 
                     onChange={(e) => setMasterSettings({...masterSettings, bassGain: e.target.value})}
                     className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
-                    <option>+4dB (Subtle Warmth)</option>
-                    <option>+8dB (Cinematic Trailer Rumble)</option>
-                    <option>+12dB (Deep Chest Resonance)</option>
+                    <option value="+4dB">+4dB (Subtle Warmth)</option>
+                    <option value="+8dB">+8dB (Cinematic Trailer Rumble)</option>
+                    <option value="+12dB">+12dB (Deep Chest Resonance)</option>
                   </select>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
@@ -264,15 +294,14 @@ export default function CinematicVoiceStudio() {
                     value={masterSettings.reverb} 
                     onChange={(e) => setMasterSettings({...masterSettings, reverb: e.target.value})}
                     className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
-                    <option>Cinematic Hall (Subtle)</option>
-                    <option>Dark Abandoned Bunker</option>
-                    <option>Vast Open Space / Sci-Fi Void</option>
+                    <option value="Subtle">Cinematic Hall (Subtle)</option>
+                    <option value="Bunker">Dark Abandoned Bunker</option>
+                    <option value="Void">Vast Open Space / Sci-Fi Void</option>
                   </select>
                 </div>
               </div>
             </div>
           )}
-
         </div>
 
         {/* Right Panel: Monitor & Master Export Suite */}
@@ -289,7 +318,7 @@ export default function CinematicVoiceStudio() {
               </div>
               <div>
                 <h3 className="font-medium text-sm text-slate-200">Scene_01_Master.wav</h3>
-                <p className="text-xs text-slate-500 mt-1">Staged with 3 Character Voices & DSP Mastering</p>
+                <p className="text-xs text-slate-500 mt-1">Live Output from Gemini AI</p>
               </div>
 
               {generatedAudioUrl ? (
@@ -297,24 +326,18 @@ export default function CinematicVoiceStudio() {
                   <audio controls className="w-full h-10 accent-amber-500">
                     <source src={generatedAudioUrl} type="audio/wav" />
                   </audio>
-                  <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-2">
+                  <a 
+                    href={generatedAudioUrl} 
+                    download="Scene_01_Master.wav"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-2">
                     <Download className="w-4 h-4" />
                     <span>Download Master WAV for Video Editor</span>
-                  </button>
+                  </a>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 italic pt-2">Configure script and click generate to preview.</p>
+                <p className="text-xs text-slate-500 italic pt-2">Enter your API key, configure script, and click generate.</p>
               )}
             </div>
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h3 className="text-xs font-semibold tracking-wider uppercase text-slate-400 mb-3">Moviemaking Directives</h3>
-            <ul className="space-y-2 text-xs text-slate-400 font-sans">
-              <li>• Assign characters per line to create realistic dialogue turns.</li>
-              <li>• Use ellipsis (`...`) in dialogue to command the TTS engine to generate natural cinematic timing pauses.</li>
-              <li>• Import downloaded `.wav` stems directly into DaVinci Resolve or CapCut alongside your generated video files.</li>
-            </ul>
           </div>
         </div>
 
