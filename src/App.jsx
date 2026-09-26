@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
 import { Play, Download, Settings, Users, Film, Sparkles, Volume2, Plus, Trash2, Radio } from 'lucide-react';
-import { GEMINI_API_KEY } from './config'; // Securely imported from your config file
+import { GoogleGenAI } from '@google/genai';
+import { GEMINI_API_KEY } from './config';
 
 export default function CinematicVoiceStudio() {
   const [activeTab, setActiveTab] = useState('script'); 
   
-  // Character Cast Management (Young to Elder Hero Archetypes & Villains)
   const [cast, setCast] = useState([
-    { id: 1, name: 'Alex (Young Protagonist)', voice: 'Puck', age: 'Young Adult (20s)', timbre: 'Eager, tense, high-energy' },
-    { id: 2, name: 'Commander Vance (Veteran Mentor)', voice: 'Kore', age: 'Elder (60s)', timbre: 'Deep, gravelly, weathered bass' },
-    { id: 3, name: 'The Interrogator (Villain)', voice: 'Charon', age: 'Middle-Aged', timbre: 'Cold, calculated, chilling whisper' }
+    { id: 1, name: 'Alex (Young Protagonist)', voice: 'Puck', age: 'Young Adult (20s)', timbre: 'Eager, tense, high-energy', basePrompt: 'Speak in a tense, breathless, young heroic voice under extreme pressure:' },
+    { id: 2, name: 'Commander Vance (Veteran Mentor)', voice: 'Kore', age: 'Elder (60s)', timbre: 'Deep, gravelly, weathered bass', basePrompt: 'Speak in a deep, slow, weathered elder mentor voice with heavy bass and absolute authority:' },
+    { id: 3, name: 'The Interrogator (Villain)', voice: 'Charon', age: 'Middle-Aged', timbre: 'Cold, calculated, chilling whisper', basePrompt: 'Speak in a cold, calculating, eerie villain voice, slow and menacing:' }
   ]);
 
-  // Movie Dialogue & Scene Script Lines
   const [scriptLines, setScriptLines] = useState([
     { id: 1, characterId: 1, text: "The signal... it's coming from inside the locked bunker.", situation: "Whispering in a dark room" },
     { id: 2, characterId: 2, text: "Step away from the terminal, kid. You don't know what we woke up.", situation: "Authoritative warning" },
@@ -35,7 +34,39 @@ export default function CinematicVoiceStudio() {
     setScriptLines(scriptLines.filter(line => line.id !== id));
   };
 
-  // Live Gemini 3.8-Flash TTS API Integration
+  // Helper to attach WAV header so the browser player recognizes track duration
+  const addWavHeader = (pcmBytes, sampleRate = 24000) => {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+    const blockAlign = (numChannels * bitsPerSample) / 8;
+    const dataSize = pcmBytes.length;
+    const chunkSize = 36 + dataSize;
+
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, chunkSize, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    view.setUint32(16, 16, true); 
+    view.setUint16(20, 1, true); 
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    view.setUint32(36, 0x64617461, false); // "data"
+    view.setUint32(40, dataSize, true);
+
+    const wavBytes = new Uint8Array(header.byteLength + pcmBytes.length);
+    wavBytes.set(new Uint8Array(header), 0);
+    wavBytes.set(pcmBytes, header.byteLength);
+    return wavBytes;
+  };
+
+  // Live Gemini 3.8-Flash SDK Integration
   const handleGenerateMovieAudio = async () => {
     if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_ACTUAL_API_KEY_HERE") {
       alert("Please update src/config.js with your actual Google AI Studio API key first!");
@@ -45,68 +76,44 @@ export default function CinematicVoiceStudio() {
     setGeneratedAudioUrl(null);
 
     try {
-      // Structure script lines with speech metadata for multi-speaker turns
-      const parts = scriptLines.map(line => {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+      const fullScriptPayload = scriptLines.map(line => {
         const char = cast.find(c => c.id === Number(line.characterId)) || cast[0];
-        return {
-          text: line.text,
-          speechMetadata: {
-            speaker: char.name,
-            style: `${line.situation}, voice timbre: ${char.timbre}`
-          }
-        };
+        return `${char.basePrompt} [Situation: ${line.situation}] "${line.text}"`;
+      }).join("\n\n");
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: fullScriptPayload,
+        config: {
+          responseModalities: ['AUDIO'],
+        },
       });
-
-      // Map unique speakers to their respective prebuilt voices
-      const speakersConfig = cast.map(c => ({
-        speaker: c.name,
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: c.voice } }
-      }));
-
-      // Call the dedicated gemini-3.8-flash-tts endpoint
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: parts }],
-          config: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              multiSpeakerVoiceConfig: {
-                speakerVoiceConfigs: speakersConfig
-              }
-            }
-          }
-        })
-      });
-
-      const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(data.error.message || "API Error occurred");
-      }
 
       let base64Audio = null;
-      const candidate = data.candidates?.[0];
-      if (candidate?.content?.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData?.data) {
-            base64Audio = part.inlineData.data;
-            break;
+      for (const candidate of response.candidates || []) {
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              base64Audio = part.inlineData.data;
+              break;
+            }
           }
         }
+        if (base64Audio) break;
       }
 
       if (base64Audio) {
         const binaryString = atob(base64Audio);
         const len = binaryString.length;
-        const bytes = new Uint8Array(len);
+        const pcmBytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+          pcmBytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Gemini 3.8 TTS automatically returns valid WAV data with standard RIFF headers
-        const wavBlob = new Blob([bytes], { type: 'audio/wav' });
+        const wavBytes = addWavHeader(pcmBytes, 24000);
+        const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
         const audioUrl = URL.createObjectURL(wavBlob);
         
         setGeneratedAudioUrl(audioUrl);
@@ -115,7 +122,7 @@ export default function CinematicVoiceStudio() {
       }
 
     } catch (error) {
-      console.error("Gemini TTS API Error:", error);
+      console.error("Gemini SDK Error:", error);
       alert("Error generating audio: " + error.message);
     } finally {
       setIsGenerating(false);
@@ -129,7 +136,7 @@ export default function CinematicVoiceStudio() {
           <Film className="w-8 h-8 text-amber-500 animate-pulse" />
           <div>
             <h1 className="text-2xl font-bold tracking-wider">CINEMATIC VOICE PRO</h1>
-            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini 3.8 Flash TTS</p>
+            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini 3.8 Flash</p>
           </div>
         </div>
         
@@ -217,7 +224,7 @@ export default function CinematicVoiceStudio() {
                 onClick={handleGenerateMovieAudio}
                 disabled={isGenerating}
                 className="w-full mt-6 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
-                {isGenerating ? <span>Synthesizing Live Gemini 3.8-Flash TTS Audio...</span> : <><Volume2 className="w-5 h-5" /><span>Generate Multi-Speaker Movie Audio</span></>}
+                {isGenerating ? <span>Synthesizing Live Gemini 3.8-Flash Audio...</span> : <><Volume2 className="w-5 h-5" /><span>Generate Cinematic Scene Audio</span></>}
               </button>
             </div>
           )}
@@ -251,7 +258,7 @@ export default function CinematicVoiceStudio() {
               </div>
               <div>
                 <h3 className="font-medium text-sm text-slate-200">Scene_01_Master.wav</h3>
-                <p className="text-xs text-slate-500 mt-1">Live Output from Gemini 3.8 Flash TTS</p>
+                <p className="text-xs text-slate-500 mt-1">Live Output from Gemini 3.8 Flash</p>
               </div>
 
               {generatedAudioUrl ? (
@@ -266,7 +273,7 @@ export default function CinematicVoiceStudio() {
                   </a>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 italic pt-2">Click generate to build your multi-speaker movie audio.</p>
+                <p className="text-xs text-slate-500 italic pt-2">Click generate to build your master audio.</p>
               )}
             </div>
           </div>
