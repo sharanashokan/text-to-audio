@@ -39,7 +39,45 @@ export default function CinematicVoiceStudio() {
     setScriptLines(scriptLines.filter(line => line.id !== id));
   };
 
-  // Live Gemini API Integration
+  // Helper function to add a standard WAV header to raw PCM bytes from Gemini
+  const addWavHeader = (pcmBytes, sampleRate = 24000) => {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+    const blockAlign = (numChannels * bitsPerSample) / 8;
+    const dataSize = pcmBytes.length;
+    const chunkSize = 36 + dataSize;
+
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+
+    // "RIFF" chunk descriptor
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, chunkSize, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+
+    // "fmt " sub-chunk
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    view.setUint32(16, 16, true); // SubChunk1Size (16 for PCM)
+    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+
+    // "data" sub-chunk
+    view.setUint32(36, 0x64617461, false); // "data"
+    view.setUint32(40, dataSize, true);
+
+    // Combine header and PCM bytes
+    const wavBytes = new Uint8Array(header.byteLength + pcmBytes.length);
+    wavBytes.set(new Uint8Array(header), 0);
+    wavBytes.set(pcmBytes, header.byteLength);
+    return wavBytes;
+  };
+
+  // Live Gemini API Integration with WAV Header Formatting
   const handleGenerateMovieAudio = async () => {
     if (!apiKey) {
       alert("Please enter your Google AI Studio API Key first!");
@@ -51,13 +89,11 @@ export default function CinematicVoiceStudio() {
     try {
       const ai = new GoogleGenAI({ apiKey: apiKey });
 
-      // Build structured screenplay prompt package for Gemini
       const fullScriptPayload = scriptLines.map(line => {
         const char = cast.find(c => c.id === Number(line.characterId)) || cast[0];
         return `${char.basePrompt} [Situation: ${line.situation}] "${line.text}"`;
       }).join("\n\n");
 
-      // Call Gemini model with AUDIO response modality
       const response = await ai.models.generateContent({
         model: 'gemini-2.0-flash',
         contents: fullScriptPayload,
@@ -66,7 +102,6 @@ export default function CinematicVoiceStudio() {
         },
       });
 
-      // Extract base64 audio data from response candidates
       let base64Audio = null;
       for (const candidate of response.candidates || []) {
         if (candidate.content && candidate.content.parts) {
@@ -81,14 +116,16 @@ export default function CinematicVoiceStudio() {
       }
 
       if (base64Audio) {
-        // Convert base64 PCM data into a playable Blob URL
         const binaryString = atob(base64Audio);
         const len = binaryString.length;
-        const bytes = new Uint8Array(len);
+        const pcmBytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+          pcmBytes[i] = binaryString.charCodeAt(i);
         }
-        const wavBlob = new Blob([bytes], { type: 'audio/wav' });
+
+        // Attach the WAV header so browsers and editors recognize the file duration
+        const wavBytes = addWavHeader(pcmBytes, 24000);
+        const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
         const audioUrl = URL.createObjectURL(wavBlob);
         
         setGeneratedAudioUrl(audioUrl);
