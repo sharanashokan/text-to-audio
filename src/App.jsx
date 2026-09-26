@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Play, Download, Settings, Users, Film, Sparkles, Volume2, Plus, Trash2, Radio } from 'lucide-react';
+import { GEMINI_API_KEY } from './config'; // Securely imported from your config file
 
 export default function CinematicVoiceStudio() {
-  const [apiKey, setApiKey] = useState('');
   const [activeTab, setActiveTab] = useState('script'); 
   
+  // Character Cast Management (Young to Elder Hero Archetypes & Villains)
   const [cast, setCast] = useState([
     { id: 1, name: 'Alex (Young Protagonist)', voice: 'Puck', age: 'Young Adult (20s)', timbre: 'Eager, tense, high-energy', basePrompt: 'Speak in a tense, breathless, young heroic voice under extreme pressure:' },
     { id: 2, name: 'Commander Vance (Veteran Mentor)', voice: 'Kore', age: 'Elder (60s)', timbre: 'Deep, gravelly, weathered bass', basePrompt: 'Speak in a deep, slow, weathered elder mentor voice with heavy bass and absolute authority:' },
     { id: 3, name: 'The Interrogator (Villain)', voice: 'Charon', age: 'Middle-Aged', timbre: 'Cold, calculated, chilling whisper', basePrompt: 'Speak in a cold, calculating, eerie villain voice, slow and menacing:' }
   ]);
 
+  // Movie Dialogue & Scene Script Lines
   const [scriptLines, setScriptLines] = useState([
     { id: 1, characterId: 1, text: "The signal... it's coming from inside the locked bunker.", situation: "Whispering in a dark room" },
     { id: 2, characterId: 2, text: "Step away from the terminal, kid. You don't know what we woke up.", situation: "Authoritative warning" },
@@ -38,7 +40,8 @@ export default function CinematicVoiceStudio() {
     setScriptLines(scriptLines.filter(line => line.id !== id));
   };
 
-  // Helper to attach WAV header so the browser player recognizes track duration
+  // Helper utility to attach a 44-byte WAV header to raw PCM bytes.
+  // This solves the "0:00 / 0:00" duration bug in browser players and video editors.
   const addWavHeader = (pcmBytes, sampleRate = 24000) => {
     const numChannels = 1;
     const bitsPerSample = 16;
@@ -70,10 +73,10 @@ export default function CinematicVoiceStudio() {
     return wavBytes;
   };
 
-  // Direct Live Gemini REST API Integration
+  // Live Gemini 3.8-Flash API Integration
   const handleGenerateMovieAudio = async () => {
-    if (!apiKey) {
-      alert("Please enter your Google AI Studio API Key first!");
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_ACTUAL_API_KEY_HERE") {
+      alert("Please update src/config.js with your actual Google AI Studio API key first!");
       return;
     }
     setIsGenerating(true);
@@ -85,7 +88,7 @@ export default function CinematicVoiceStudio() {
         return `${char.basePrompt} [Situation: ${line.situation}] "${line.text}"`;
       }).join("\n\n");
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -127,7 +130,7 @@ export default function CinematicVoiceStudio() {
         
         setGeneratedAudioUrl(audioUrl);
       } else {
-        alert("Audio generation completed, but no audio bytes were returned by the model.");
+        alert("Audio generation completed, but no audio stream bytes were returned by the model.");
       }
 
     } catch (error) {
@@ -145,19 +148,13 @@ export default function CinematicVoiceStudio() {
           <Film className="w-8 h-8 text-amber-500 animate-pulse" />
           <div>
             <h1 className="text-2xl font-bold tracking-wider">CINEMATIC VOICE PRO</h1>
-            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini Live TTS</p>
+            <p className="text-xs text-slate-400">AI Movie Audio Production Suite powered by Gemini 3.8 Flash</p>
           </div>
         </div>
         
-        <div className="flex items-center space-x-2 bg-slate-900 p-2 rounded-lg border border-slate-800">
-          <Radio className="w-4 h-4 text-emerald-400" />
-          <input 
-            type="password" 
-            placeholder="Enter Google AI Studio Key..." 
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="bg-transparent text-sm focus:outline-none w-64 text-slate-200"
-          />
+        <div className="flex items-center space-x-2 bg-slate-900 px-4 py-2 rounded-lg border border-slate-800 text-emerald-400 text-xs font-mono">
+          <Radio className="w-4 h-4" />
+          <span>API Key: Secured in config.js</span>
         </div>
       </header>
 
@@ -240,7 +237,7 @@ export default function CinematicVoiceStudio() {
                 onClick={handleGenerateMovieAudio}
                 disabled={isGenerating}
                 className="w-full mt-6 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
-                {isGenerating ? <span>Synthesizing Live Gemini Cinematic Audio...</span> : <><Volume2 className="w-5 h-5" /><span>Generate & Master Movie Scene Audio</span></>}
+                {isGenerating ? <span>Synthesizing Live Gemini 3.8-Flash Audio...</span> : <><Volume2 className="w-5 h-5" /><span>Generate & Master Movie Scene Audio</span></>}
               </button>
             </div>
           )}
@@ -289,7 +286,7 @@ export default function CinematicVoiceStudio() {
               </div>
               <div>
                 <h3 className="font-medium text-sm text-slate-200">Scene_01_Master.wav</h3>
-                <p className="text-xs text-slate-500 mt-1">Live Output from Gemini AI</p>
+                <p className="text-xs text-slate-500 mt-1">Live Output from Gemini 3.8 Flash</p>
               </div>
 
               {generatedAudioUrl ? (
@@ -298,13 +295,13 @@ export default function CinematicVoiceStudio() {
                   <a 
                     href={generatedAudioUrl} 
                     download="Scene_01_Master.wav"
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-2">
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-lg">
                     <Download className="w-4 h-4" />
                     <span>Download Master WAV for Video Editor</span>
                   </a>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 italic pt-2">Enter your API key and click generate to unlock player.</p>
+                <p className="text-xs text-slate-500 italic pt-2">Click generate to build your master audio.</p>
               )}
             </div>
           </div>
